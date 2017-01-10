@@ -7,6 +7,8 @@
 #define KEY_SET  KEY_NUMBER_3
 #define KEY_ADD  KEY_NUMBER_2
 #define KEY_SUB  KEY_NUMBER_1
+#define TRG_USE_ADC  1
+#define TRG_THRESOLD   500
 
 
 typedef enum
@@ -112,8 +114,14 @@ SET_NUMBER_3,
 SET_NUMBER_4
 }_SET_NUMBER;
 
-extern _MAINTIME maintime;
+typedef enum
+{
+ MODE_AUTO = 0x00,
+ MODE_MANU
+}_OP_MODE;
 
+
+extern _MAINTIME maintime;
 extern void Keyevent_Process();
 extern  void CheckRelayTiming();
 extern _RTC_VALUE GetTime();
@@ -124,5 +132,9 @@ extern void DetectEntryTest();
 unsigned char  CheckTimingData();
 unsigned int TimeChange2Number(_TIMING_VALUE rtc);
 void RetlayStateJude();
+void TriggerHandler(unsigned char trg_result);
+void SwtichHandler(unsigned char sw_ret);
+void TriggerUseAdc();
+void CheckDelayOpration();
 
 #endif
