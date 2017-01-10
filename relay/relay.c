@@ -11,13 +11,13 @@ void Relay_Init(void)
   PC_CR1_bit.C13  = 1;  //设置为推挽输出
   PC_CR2_bit.C23  = 1;  //设置输出速率为10MHZ
    
-  PE_DDR_bit.DDR5 = 1;  //设置端口PD->7的输入输出方向寄存器为输出方向
-  PE_CR1_bit.C15  = 1;  //设置为推挽输出
-  PE_CR2_bit.C25  = 1;  //设置输出速率为10MHZ
+//  PE_DDR_bit.DDR5 = 1;  //设置端口PD->7的输入输出方向寄存器为输出方向
+//  PE_CR1_bit.C15  = 1;  //设置为推挽输出
+//  PE_CR2_bit.C25  = 1;  //设置输出速率为10MHZ
   
   RELAY_1_OFF();
   RELAY_2_OFF();
-  RELAY_3_OFF();
+//  RELAY_3_OFF();
   
 }
 
