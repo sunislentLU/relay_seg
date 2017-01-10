@@ -1,4 +1,5 @@
 #include<trigger.h>
+#include<main.h>
 
 
 void Trigger_Init()
@@ -7,7 +8,7 @@ void Trigger_Init()
   PA_DDR_bit.DDR1 = 0;      //GPC->PIN1 设置为输入模式
   PA_CR1_bit.C11 = 1;       //GPC->PIN1 带上拉电阻输入
   PA_CR2_bit.C21 = 0;       //GPC->PIN1  禁止外部中断
-  
+ 
   PA_DDR_bit.DDR2 = 0;      //GPD->PIN2 设置为输入模式
   PA_CR1_bit.C12 = 1;       //GPD->PIN2 带上拉电阻输入
   PA_CR2_bit.C22 = 0;       //GPD->PIN2  禁止外部中断
@@ -16,9 +17,9 @@ void Trigger_Init()
   PF_CR1_bit.C14 = 1;       //GPD->PIN3 带上拉电阻输入
   PF_CR2_bit.C24 = 0;       //GPD->PIN3  禁止外部中断
   
-  PB_DDR_bit.DDR4 = 0;      //GPD->PIN3 设置为输入模式
-  PB_CR1_bit.C14 = 1;       //GPD->PIN3 带上拉电阻输入
-  PB_CR2_bit.C24 = 0;       //GPD->PIN3  禁止外部中断
+//  PB_DDR_bit.DDR4 = 0;      //GPD->PIN3 设置为输入模式
+//  PB_CR1_bit.C14 = 1;       //GPD->PIN3 带上拉电阻输入
+//  PB_CR2_bit.C24 = 0;       //GPD->PIN3  禁止外部中断
   
   
 }
@@ -34,66 +35,67 @@ void FollowTest()
   
 }
 
-unsigned char  Read_SwitchIO()
+unsigned char  Read_TriggerIO()
 {
   unsigned char ret = 0;
-  if(TRG_IN_4 == 1)
-    ret |=1;
+//  if(TRG_IN_4 == 1)
+//    ret |=1;
   ret<<=1;
   if(TRG_IN_3 == 1) 
     ret |=1;
   ret<<=1;
-  if(TRG_IN_2 == 1) 
-    ret |=1;
+//  if(TRG_IN_2 == 1) 
+//    ret |=1;
   ret<<=1;
-  if(TRG_IN_1 == 1) 
-    ret |=1;
+//  if(TRG_IN_1 == 1) 
+//    ret |=1;
   return ret;
 }
 
-_SW_STATE  sw_state = SW_STATE_IDLE;
+_TRG_STATUS  trg_status = TRG_STATE_IDLE;
 
-unsigned char sw_io_tmp;
-static unsigned char sw_cnt = 0;
+unsigned char trg_io_tmp;
+static unsigned char trg_cnt = 0;
 
 
-unsigned char  SW_Scan()
+unsigned char  Trg_Scan()
 {
-  unsigned char sw_io;
+  unsigned char trg_io;
   unsigned char ret =0xff;
-  sw_io = Read_SwitchIO();
-  switch(sw_state)
+  trg_io = Read_TriggerIO();
+  switch(trg_status)
   {
-  case SW_STATE_IDLE:
-    if(sw_io != sw_io_tmp)
+  case TRG_STATE_IDLE:
+    if(trg_io != trg_io_tmp)
     {
-      sw_io_tmp = sw_io;
-      sw_cnt = 0;
-      sw_state = SW_STATE_CHG;
+      trg_io_tmp = trg_io;
+      trg_cnt = 0;
+      trg_status = TRG_STATE_CHG;
     }
     break;
-  case SW_STATE_CHG:
-    if(sw_io != sw_io_tmp)
-      sw_state = SW_STATE_IDLE;
+  case TRG_STATE_CHG:
+    if(trg_io != trg_io_tmp)
+      trg_status = TRG_STATE_IDLE;
     else
-      sw_cnt++;
-    if(sw_cnt == 100)//1000ms
-      sw_state = SW_STATE_DOWN;
+      trg_cnt++;
+    if(trg_cnt == 100)//1000ms
+      trg_status = TRG_STATE_DOWN;
     break; 
-  case SW_STATE_DOWN:
-    if(sw_io_tmp == sw_io)
+  case TRG_STATE_DOWN:
+    if(trg_io_tmp == trg_io)
     {
-      ret = sw_io_tmp;
+      ret = trg_io_tmp;
     }
     else
       ret = 0xff;
-    sw_state = SW_STATE_IDLE;
+    trg_status = TRG_STATE_IDLE;
     break; 
   }
   return ret;
 }
 
 
+#if(TRG_USE_ADC == 1)
 
 /*******************************************************************************
 **函数名称：void ADC_Init()
@@ -109,8 +111,8 @@ void ADC_Port_Init()
   
   ADC_CR1_bit.SPSEL = 0;    //fmaster / 18 = 16MHZ / 18 = 888888HZ
   ADC_CR2_bit.ALIGN = 1;    //RIGHT ALIGN
-  ADC_TDRH = 0xFF;          // 禁止触发功能 
-  ADC_TDRL = 0xFF;
+  ADC_TDRH = 0x00;          // 禁止触发功能 
+  ADC_TDRL = 0x02;
   ADC_CSR_bit.CH = 1;       //SELECT AIN6
   ADC_CR1_bit.CONT = 0; 
   ADC_CR1_bit.ADON = 1;     //启动ADC
@@ -140,4 +142,4 @@ void Get_ADC_AnyChannal_Value(unsigned int *AD_Value)
   //}
   *AD_Value = count;
 }
-
+#endif
