@@ -8,6 +8,8 @@
 #include<trigger.h>
 #include<buzzer_led.h>
 
+
+
 /*******************************variable and const***********************************/
 const func relayOn_tab[RELAY_NUMBER]={Relay_1_On,Relay_2_On,Relay_3_On};
 const func relayOff_tab[RELAY_NUMBER]={Relay_1_Off,Relay_2_Off,Relay_3_Off};
@@ -30,27 +32,34 @@ unsigned char menu_level = MUL_MENU_1;
 _TIM_LIMIT time_limit[4]={{{9,0},{10,0}},{{16,0},{17,0}},{{21,0},{22,0}},{{4,0},{5,0}}};
 _TIM_LIMIT limit_tmp[4]={{{0,0},{0,0}},{{0,0},{0,0}},{{0,0},{0,0}},{{0,0},{0,0}}};
 _TIMING_VALUE timing_tmp;
-
 _TRG_VALUE trg_state;
+extern _LED_TYPE led_flash_type;
+extern _BUZZER_TYPE buzzer_type;
 unsigned char trg_result = 0;
 unsigned char dis_data_tmp[BIT_NUMBER] ={17,17,17,17};
 static unsigned int dis_cnt = 0;
 /******************* main function *****************************/
 unsigned char is_entry_test = 0;
 unsigned char setting = 0;
+#if (TRG_USE_ADC == 1)
 unsigned int adc_array[16]={0};
 unsigned char adc_count = 0;
+#endif
+_OP_MODE operation_mode = MODE_AUTO;
+_LED_TYPE last_led_type = LED_FLASH_TWO;
+unsigned char delay_cnt = 60;// 触发5秒钟后关闭或者打开继电器 计数器
+
 int main( void )
 {
-  unsigned int adc_temp = 0;
-  unsigned char i = 0;
+  
   asm("sim");
-  CLK_CKDIVR = 0x00;  
+  CLK_CKDIVR = 0x00;    
+  CLK_ICKR_bit.LSIEN = 1;             // 打开芯片内部的低速振荡器LSI
+  while(CLK_ICKR_bit.LSIRDY == 0);    // 等待振荡器稳定
   Hardware_Init();
   asm("rim");
   relay_state.relay_byte = 0;
   trg_state.byte = 0;
-  // printf("all hardware gpios and interfaces init done and test the uart send datas\n\r");
 #if (USED_RTC == 1)
   //Ds1302_Time_init(rtc_value.hour,rtc_value.min,rtc_value.second,rtc_value.year,rtc_value.month,rtc_value.day,rtc_value.week);
 #endif
@@ -69,75 +78,21 @@ int main( void )
     if(is_5ms == 1)// 5ms 定时时间响应
     {
       is_5ms = 0;
-      Get_ADC_AnyChannal_Value(&adc_temp);  
-      adc_array[adc_count] = adc_temp;
-      adc_count++;      
-      if(adc_count >= 16)
-      {
-        adc_count = 0;
-        for(i=0;i<16;i++)
-        {
-          adc_temp+=adc_array[i];
-        }
-        adc_temp>>=4;
-        printf("the adc convert value is %d\n\r",adc_temp);
-        
-      }
     }
     if(is_10ms == 1)// 10ms 定时时间响应
     {
       is_10ms = 0;
       Keyevent_Process();//按键检测和案件处理程序
-      trg_result = SW_Scan();
-      if(trg_result != 0xff)
-      { 
-        if(trg_result == 0x00)// 没有触发 
-        {
-          trg_state.byte =0x00;    
-          CheckRelayTiming();//添加判断在时间段里面的开关
-        }
-        if(trg_result&0x01)//触发一触发
-        {
-          trg_state.bit.trg_1_state = TRG_ACTIVE;
-        }
-        else
-          trg_state.bit.trg_1_state = TRG_INACTIVE;
-        if(trg_result&0x02)
-        {
-          trg_state.bit.trg_2_state = TRG_ACTIVE;                                  
-        }
-        else
-          trg_state.bit.trg_2_state = TRG_INACTIVE;
-        if(trg_result&0x04)
-        {
-          trg_state.bit.trg_3_state = TRG_ACTIVE;        
-        }
-        else
-          trg_state.bit.trg_3_state = TRG_INACTIVE;
-        /***
-        在IO口没有变化的时候 SW_SCAN（） 返回的是0xff 在IO口有变化的时候才会
-        判断是触发还是没有触发，在触发4 激活的时候关闭所有继电器
-        在触发4 非激活的时候判断是否在打开时间段，如果是则再次打开
-        如果不是则关闭
-        */        
-        
-        if(trg_result&0x08)// 触发4 触发判断
-        {
-          trg_state.bit.trg_4_state = TRG_ACTIVE;                
-          if(relay_state.relay_byte != 0x00)
-          {
-            relayOff_tab[0]();
-            relayOff_tab[1]();
-            relayOff_tab[2]();
-            relay_state.relay_byte = 0x00;
-          }
-        }
-        else// 没有触发 
-        {
-          trg_state.bit.trg_4_state = TRG_INACTIVE;    
-          CheckRelayTiming();//添加判断在时间段里面的开关
-        }
+      if(operation_mode == MODE_AUTO)
+      {
+#if (TRG_USE_ADC == 1)
+        TriggerUseAdc();   
+#else
+        trg_result = Trg_Scan();
+        TriggerHandler(trg_result);
+#endif
       }
+      SwtichHandler(SW_Scan());
     }
     else if(is_100ms == 1)// 100ms 定时时间响应
     {
@@ -147,7 +102,14 @@ int main( void )
       rtc_value = GetTime();// rtc 获取时间
 #endif
       SegmentDisplay_Process();//数码管显示控制
-      RetlayStateJude();
+      if(operation_mode == MODE_AUTO) // 自动模式 才检查时间
+      {
+        RetlayStateJude();
+        CheckDelayOpration();
+      }
+      led_Flash_Process();
+     // Buzzer_Process();
+      
     }
   }
 }
@@ -182,10 +144,12 @@ void Hardware_Init()
   SegDis_Init();
   Uart_Init(9600);
   Key_Init();
-  TimeBase_Init();
+  TimeBase_Init();   
   Trigger_Init();
-  Buzzer_Led_Init();
+#if (TRG_USE_ADC == 1)
   ADC_Port_Init();
+#endif
+  Buzzer_Led_Init();
 }
 
 
@@ -200,7 +164,8 @@ void Keyevent_Process()
       dis_cnt = 0;
       if(setting == 1)
       {
-        printf("KEY_SUB press return \n\r");
+        buzzer_type = BUZZER_ON_SHORT;
+        //printf("KEY_SUB press return \n\r");
         switch(first_set_menu)
         {
         case FIRST_MENU_MAIN:
@@ -240,13 +205,14 @@ void Keyevent_Process()
           break;
         }
       }
-      else 
+      else if(operation_mode == MODE_AUTO)
       {
-        if(relay_state.relay_byte != 0x00)
+        buzzer_type = BUZZER_ON_LONG;
+        if((relay_state.relay_byte != 0x00)&&(trg_state.bit.trg_3_state == 0))
         {
           relayOff_tab[0]();
           relayOff_tab[1]();
-          relayOff_tab[2]();
+          //relayOff_tab[2]();
           relay_state.relay_byte = 0x00;
         }
       }
@@ -254,9 +220,10 @@ void Keyevent_Process()
       break;      
   case (KEY_TYPE_PRESS<<8)|KEY_ADD:// 加号键
     dis_cnt = 0;
-    printf("KEY_ADD press return \n\r");
+    //printf("KEY_ADD press return \n\r");
     if(setting == 1)
     {
+      buzzer_type = BUZZER_ON_SHORT;
       switch(first_set_menu)
       {
       case FIRST_MENU_MAIN:
@@ -295,14 +262,15 @@ void Keyevent_Process()
       default:
         break;
       }
-    }else
+    }else if(operation_mode == MODE_AUTO)
     {  
-      if((relay_state.relay_byte == 0x00)&&(trg_state.bit.trg_4_state == 0))
+      buzzer_type = BUZZER_ON_LONG;
+      if((relay_state.relay_byte == 0x00)&&(trg_state.bit.trg_3_state == 0))
       {        
         relayOn_tab[0]();
         relayOn_tab[1]();
-        relayOn_tab[2]();
-        relay_state.relay_byte = 0x07;
+        //relayOn_tab[2]();
+        relay_state.relay_byte = 0x03;
       }
     }
     break;   
@@ -310,6 +278,7 @@ void Keyevent_Process()
     dis_cnt = 0;
     if(setting == 1)
     {
+      buzzer_type = BUZZER_ON_SHORT;
       switch(first_set_menu)
       {
       case FIRST_MENU_NONE:
@@ -349,7 +318,7 @@ void Keyevent_Process()
         set_number++;// 设置位数 分 时
         if(set_number>SET_NUMBER_4)
         {
-          printf("time set over!\n\r");
+          //printf("time set over!\n\r");
           rtc_value.hour = dis_data_tmp[0]*10+dis_data_tmp[1];
           rtc_value.min = dis_data_tmp[2]*10+dis_data_tmp[3];
           DS1302SetHourMin(rtc_value.hour,rtc_value.min);
@@ -360,7 +329,7 @@ void Keyevent_Process()
         break;
         //----------------------------------------------------
       case FIRST_MENU_SET_TIMING:// 设置定时
-        printf("the menu leve is %d\n\r",menu_level);
+        //printf("the menu leve is %d\n\r",menu_level);
         switch(menu_level)
         {
         case MUL_MENU_1:  //设置关闭开始时间 
@@ -373,7 +342,7 @@ void Keyevent_Process()
             set_number = SET_NUMBER_1;
             timing_tmp.hour = dis_data_tmp[0]*10+dis_data_tmp[1];  
             timing_tmp.min = dis_data_tmp[2]*10+dis_data_tmp[3];
-            printf("the hour is %d,the min is %d\n\r",timing_tmp.hour,timing_tmp.min);
+            //printf("the hour is %d,the min is %d\n\r",timing_tmp.hour,timing_tmp.min);
             limit_tmp[menu_level/2].off_start_time = timing_tmp;
             menu_level++;
             memset(dis_data_tmp,0,4);
@@ -389,7 +358,7 @@ void Keyevent_Process()
             set_number = SET_NUMBER_1;
             timing_tmp.hour = dis_data_tmp[0]*10+dis_data_tmp[1];  
             timing_tmp.min = dis_data_tmp[2]*10+dis_data_tmp[3];  
-            printf("the hour is %d,the min is %d\n\r",timing_tmp.hour,timing_tmp.min);
+            //printf("the hour is %d,the min is %d\n\r",timing_tmp.hour,timing_tmp.min);
             limit_tmp[menu_level/2].off_stop_time = timing_tmp;
             menu_level++;
             memset(dis_data_tmp,17,4);
@@ -397,17 +366,17 @@ void Keyevent_Process()
             dis_data_tmp[2] = menu_level/2;
             if(menu_level>=8)// 6个时间设置完成
             {
-              printf("timing set ok!\n\r");
-              printf("stop time 1 is %d:%d to %d:%d /n/r",limit_tmp[0].off_start_time.hour \
-                ,limit_tmp[0].off_start_time.min,limit_tmp[0].off_stop_time.hour \
-                  ,limit_tmp[0].off_stop_time.min);
-              printf("stop time 2 is %d:%d to %d:%d /n/r",limit_tmp[1].off_start_time.hour \
-                ,limit_tmp[1].off_start_time.min,limit_tmp[1].off_stop_time.hour \
-                  ,limit_tmp[1].off_stop_time.min );
+              //  printf("timing set ok!\n\r");
+              // printf("stop time 1 is %d:%d to %d:%d /n/r",limit_tmp[0].off_start_time.hour \
+              ,limit_tmp[0].off_start_time.min,limit_tmp[0].off_stop_time.hour \
+                ,limit_tmp[0].off_stop_time.min);
+              // printf("stop time 2 is %d:%d to %d:%d /n/r",limit_tmp[1].off_start_time.hour \
+              ,limit_tmp[1].off_start_time.min,limit_tmp[1].off_stop_time.hour \
+                ,limit_tmp[1].off_stop_time.min );
               
-              printf("stop time 3 is %d:%d to %d:%d /n/r",limit_tmp[2].off_start_time.hour \
-                ,limit_tmp[2].off_start_time.min,limit_tmp[2].off_stop_time.hour \
-                  ,limit_tmp[2].off_stop_time.min );           
+              // printf("stop time 3 is %d:%d to %d:%d /n/r",limit_tmp[2].off_start_time.hour \
+              ,limit_tmp[2].off_start_time.min,limit_tmp[2].off_stop_time.hour \
+                ,limit_tmp[2].off_stop_time.min );           
               if(CheckTimingData()==0)
                 printf("write timing time error\n\r");
               dis_parameter.state = DIS_STATE_TIME;      
@@ -415,7 +384,7 @@ void Keyevent_Process()
               first_set_menu = FIRST_MENU_NONE;          
             }
           }
-          break;
+        break;
         default://0~7 之外 就是设置完成后
           dis_parameter.state = DIS_STATE_TIME;           
           set_number = SET_NUMBER_1;                 
@@ -423,8 +392,8 @@ void Keyevent_Process()
           
           break;
         }
-        break;
-        
+      break;
+      
       default:
         break;
       }
@@ -435,15 +404,15 @@ void Keyevent_Process()
     break;  
     /******************长按**************************/
   case (KEY_TYPE_LONG_PRESS<<8)|KEY_SUB:// 长按按键一进入设置延迟继电器1流程
-    printf("KEY_SUB long press  \n\r");
+    //printf("KEY_SUB long press  \n\r");
     
     break;
   case (KEY_TYPE_LONG_PRESS<<8)|KEY_ADD:
-    printf("KEY_ADD long press  \n\r");
+    //  printf("KEY_ADD long press  \n\r");
     
     break;
   case (KEY_TYPE_LONG_PRESS<<8)|KEY_SET:
-    printf("KEY_SET long press  \n\r");
+    // printf("KEY_SET long press  \n\r");
     
     break;   
     /*******************双击*************************/ 
@@ -453,9 +422,9 @@ void Keyevent_Process()
   case (KEY_TYPE_HOLD<<8)|KEY_SET:
     if(setting == 0)
     {
-      printf("KEY_SET Hold press\n\r");
       setting = 1;
-      LED1_ON();
+      led_flash_type = LED_ALWAYS_ON;
+      buzzer_type = BUZZER_ON_LONG;
     }
     else
     {
@@ -470,9 +439,7 @@ void Keyevent_Process()
       dis_parameter.state = DIS_STATE_TIME;
       set_number = SET_NUMBER_1; 
       setting = 0;
-      LED1_OFF();
-      
-      
+      led_flash_type = last_led_type;
     }
     break;  
     
@@ -511,7 +478,7 @@ void CheckRelayTiming()
     {
       relayOff_tab[0]();
       relayOff_tab[1]();
-      relayOff_tab[2]();
+      //relayOff_tab[2]();
       relay_state.relay_byte = 0x00;
     }
     
@@ -521,7 +488,7 @@ void CheckRelayTiming()
     {
       relayOn_tab[0]();
       relayOn_tab[1]();
-      relayOn_tab[2]();
+      //relayOn_tab[2]();
       relay_state.relay_byte = 0x07;
     }
     
@@ -587,7 +554,8 @@ void SegmentDisplay_Process()
       dis_parameter.state = DIS_STATE_TIME;
       set_number = SET_NUMBER_1; 
       setting = 0;
-      LED1_OFF();
+      //LED1_OFF();
+      led_flash_type = LED_FLASH_TWO;
     }
   }
   
@@ -705,7 +673,7 @@ void RetlayStateJude()
       {
         relayOff_tab[0]();
         relayOff_tab[1]();
-        relayOff_tab[2]();
+        //relayOff_tab[2]();
         relay_state.relay_byte = 0x00;
       }
       
@@ -715,13 +683,13 @@ void RetlayStateJude()
         ((rtc_value.hour == time_limit[2].off_stop_time.hour)&&(rtc_value.min == time_limit[2].off_stop_time.min))||
           ((rtc_value.hour == time_limit[3].off_stop_time.hour)&&(rtc_value.min == time_limit[3].off_stop_time.min)))
     {
-      if(trg_state.bit.trg_4_state == 0)
+      if(trg_state.bit.trg_3_state == 0)
       {
         if(relay_state.relay_byte == 0)
         {
           relayOn_tab[0]();
           relayOn_tab[1]();
-          relayOn_tab[2]();
+          //relayOn_tab[2]();
           relay_state.relay_byte = 0x07;
         }
       }
@@ -735,4 +703,166 @@ unsigned int TimeChange2Number(_TIMING_VALUE rtc)
   unsigned int ret = 0;
   ret = rtc.hour*60+rtc.min; 
   return ret;
+}
+
+void TriggerHandler(unsigned char trg_result)
+{
+  unsigned char trigger;
+  trigger = trg_result;
+  if(trigger != 0xff)
+  { 
+    if(trigger == 0x00)// 没有触发 
+    {
+      trg_state.byte =0x00;    
+      CheckRelayTiming();//添加判断在时间段里面的开关
+    }
+    if(trigger&0x01)//触发一触发
+    {
+      trg_state.bit.trg_1_state = TRG_ACTIVE;
+    }
+    else
+      trg_state.bit.trg_1_state = TRG_INACTIVE;
+    if(trigger&0x02)
+    {
+      trg_state.bit.trg_2_state = TRG_ACTIVE;                                  
+    }
+    else
+      trg_state.bit.trg_2_state = TRG_INACTIVE;
+    if(trigger&0x08)
+    {
+      trg_state.bit.trg_4_state = TRG_ACTIVE;        
+    }
+    else
+      trg_state.bit.trg_4_state = TRG_INACTIVE;
+    /***
+    在IO口没有变化的时候 SW_SCAN（） 返回的是0xff 在IO口有变化的时候才会
+    判断是触发还是没有触发，在触发4 激活的时候关闭所有继电器
+    在触发4 非激活的时候判断是否在打开时间段，如果是则再次打开
+    如果不是则关闭
+    */        
+    
+    if(trigger&0x04)// 触发4 触发判断
+    {
+      trg_state.bit.trg_3_state = TRG_ACTIVE;                
+      //          if(relay_state.relay_byte != 0x00)
+      //          {
+      //            relayOff_tab[0]();
+      //            relayOff_tab[1]();
+      //            //relayOff_tab[2]();
+      //            relay_state.relay_byte = 0x00;
+      //          }
+      delay_cnt = 0;
+    }
+    else// 没有触发 
+    {
+      //          trg_state.bit.trg_3_state = TRG_INACTIVE;    
+      //          CheckRelayTiming();//添加判断在时间段里面的开关
+      delay_cnt = 0;
+    }
+  }
+}
+
+void SwtichHandler(unsigned char sw_ret)
+{
+  if(sw_ret  == 0xff)
+    return;
+  switch(sw_ret)
+  {
+  case SW_NONE:
+    operation_mode = MODE_AUTO;
+    CheckRelayTiming();
+    led_flash_type = LED_FLASH_TWO;
+    last_led_type = LED_FLASH_TWO;
+    break;
+  case SW1_ACTIVE:
+    operation_mode = MODE_MANU;
+    led_flash_type = LED_FLASH_ONE;
+    last_led_type = LED_FLASH_ONE;
+    if(relay_state.relay_byte != 0x03)
+    {
+      relayOn_tab[0]();
+      relayOn_tab[1]();
+      //relayOn_tab[2]();
+      relay_state.relay_byte = 0x03;
+    }
+    break;
+  case SW2_ACTIVE:
+    operation_mode = MODE_MANU;
+    led_flash_type = LED_FLASH_ONE;
+    last_led_type = LED_FLASH_ONE;
+    if(relay_state.relay_byte != 0x00)
+    {
+      relayOff_tab[0]();
+      relayOff_tab[1]();
+      //relayOff_tab[2]();
+      relay_state.relay_byte = 0x00;
+    }
+    break;
+  }
+}
+
+void TriggerUseAdc()
+{
+  unsigned int adc_temp = 0;
+  unsigned char i = 0;
+  Get_ADC_AnyChannal_Value(&adc_temp);  
+  adc_array[adc_count] = adc_temp;
+  adc_count++;      
+  if(adc_count >= 16)
+  {
+    adc_count = 0;
+    for(i=0;i<16;i++)
+    {
+      adc_temp+=adc_array[i];
+    }
+    adc_temp>>=4;
+    printf("the adc convert value is %d\n\r",adc_temp);
+    if(adc_temp >= TRG_THRESOLD)
+    {
+      printf("water is full!\n\r");
+      if(trg_state.bit.trg_3_state== TRG_ACTIVE )
+      {
+        trg_state.bit.trg_3_state = TRG_INACTIVE;
+        delay_cnt = 0;
+      }
+    }
+    else
+    {
+      if(trg_state.bit.trg_3_state== TRG_INACTIVE )
+      {
+        trg_state.bit.trg_3_state= TRG_ACTIVE;
+        printf("water is not full!\n\r");
+        delay_cnt = 0;
+      }
+    }
+  }
+  
+}
+
+void CheckDelayOpration()
+{
+  if(delay_cnt < 50)
+  {
+    delay_cnt++;
+    if(delay_cnt == 50) //5 second
+    {
+      if(trg_state.bit.trg_3_state == TRG_ACTIVE)  
+      {
+        if(relay_state.relay_byte != 0x00)
+        {
+          relayOff_tab[0]();
+          relayOff_tab[1]();
+          //relayOff_tab[2]();
+          relay_state.relay_byte = 0x00;
+        }
+      }
+      else if(trg_state.bit.trg_3_state == TRG_INACTIVE)
+      { 
+        CheckRelayTiming();//添加判断在时间段里面的开关
+      }
+      
+    }
+    
+  }
+  
 }
