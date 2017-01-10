@@ -18,17 +18,8 @@ void Key_Init()
   PD_DDR_bit.DDR3 = 0;      //GPD->PIN3 设置为输入模式
   PD_CR1_bit.C13 = 1;       //GPD->PIN3 带上拉电阻输入
   PD_CR2_bit.C23 = 0;       //GPD->PIN3  禁止外部中断
+  SW_Init();
 }
-
-typedef enum
-{
-  KEY_STATE_IDLE = 0x00,
-  KEY_STATE_DEBOUNCE,
-  KEY_STATE_DOWN,
-  KEY_STATE_LONG,
-  KEY_STATE_HOLD
-}_KEY_STATE;
-
 
 unsigned char  io_temp = 0;// temp to store last io state 
 unsigned char  key_is_down =0;// flag use to judge double key press
@@ -60,7 +51,7 @@ unsigned short Key_scan(void)
   case KEY_STATE_IDLE:
     if(io_tmp != io_temp)// state is changed
     {	
-     // printf("io_tmp is %d/n/rio_temp is %d\n\r",io_tmp,io_temp);
+      // printf("io_tmp is %d/n/rio_temp is %d\n\r",io_tmp,io_temp);
       io_temp = io_tmp;              
       key_number  = io_temp;		
       key_state = KEY_STATE_DEBOUNCE;		
@@ -108,7 +99,7 @@ unsigned short Key_scan(void)
       io_temp = io_tmp; // 		
       if(key_type == KEY_TYPE_NONE)
       {
-      //  printf("KEY_TYPE_PRESS\n\r");
+        //  printf("KEY_TYPE_PRESS\n\r");
         key_type = KEY_TYPE_PRESS;	
       }	
       else if(key_type == KEY_TYPE_PRESS)			
@@ -153,7 +144,10 @@ unsigned short Key_scan(void)
       // printf("KEY_TYPE_HOLD\n\r");
       io_temp = 0;	
       key_state = KEY_STATE_IDLE;
-      return ((key_type<<8)|key_number);		
+      key_ret = (key_type<<8)|key_number;
+      key_type = KEY_TYPE_NONE;
+      key_number = 0;
+      return key_ret;		
     }	
     break;	
   default:		
@@ -162,5 +156,75 @@ unsigned short Key_scan(void)
   return KEY_TYPE_NONE;//usually return 0;
 }
 
+
+void SW_Init()
+{
+  
+  PB_DDR_bit.DDR4 = 0;      //GPB->PIN4 设置为输入模式
+  PB_CR1_bit.C14 = 1;       //GPB->PIN4 带上拉电阻输入
+  PB_CR2_bit.C24 = 0;       //GPB->PIN4  禁止外部中断
+  
+  PE_DDR_bit.DDR5 = 0;      //GPE->PIN5 设置为输入模式
+  PE_CR1_bit.C15 = 1;       //GPE->PIN5 带上拉电阻输入
+  PE_CR2_bit.C25 = 0;       //GPE->PIN5  禁止外部中断
+}
+
+unsigned char Read_SwitchIO()
+{
+  unsigned char io_state = 0xff;
+
+  if(SW_2 == 0)
+    io_state = 2;
+  else if(SW_1 == 0)
+    io_state = 1;
+  else if((SW_1 == 1)&&(SW_2 == 1))
+    io_state = 0;
+  return io_state;
+}
+
+
+_SW_STATE sw_status = SW_STATE_IDLE;
+unsigned char sw_io_tmp =0xff;
+unsigned char sw_cnt = 0;
+
+
+
+unsigned char SW_Scan()
+{
+  unsigned char sw_io = 0xff;
+  unsigned char ret =0xff;
+  sw_io = Read_SwitchIO();
+  switch(sw_status)
+  {
+  case SW_STATE_IDLE:
+    if(sw_io != sw_io_tmp)
+    {
+      sw_io_tmp = sw_io;
+      sw_cnt = 0;
+      sw_status = SW_STATE_CHG;
+    }
+    break;
+  case SW_STATE_CHG:
+    if(sw_io != sw_io_tmp)
+      sw_status = SW_STATE_IDLE;
+    else
+      sw_cnt++;
+    if(sw_cnt == 100)//1000ms
+      sw_status = SW_STATE_DWN;
+    break; 
+  case SW_STATE_DWN:
+    if(sw_io_tmp == sw_io)
+    {
+      ret = sw_io_tmp;
+      sw_status = SW_STATE_IDLE;
+      return ret;
+    }
+    else
+      ret = 0xff;
+    sw_status = SW_STATE_IDLE;
+    break; 
+  }
+  return 0xff;
+}
 
 
